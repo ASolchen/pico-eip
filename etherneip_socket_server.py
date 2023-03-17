@@ -1,7 +1,45 @@
 #server
 import socket
+import struct
 
-HOST = "192.168.20.21"
+
+eip_data = b"\x6f\x00\x58\x00\x01\x00\x00\x00\x00\x00\x00\x00\xc0\xa8\x1e\xa9" \
+b"\x00\x00\x00\x01\x00\x00\x00\x00"
+
+
+
+
+class EIP_Header():
+	def __init__(self, data=None) -> None:
+		self.cmd = None
+		self.len = None
+		self.session = None
+		self.stat = None
+		self.sender_context = None
+		self.options = None
+		if data:
+			self.decode(data)
+	
+	def decode(self, data):
+		#unpacks data from the socket
+		self.cmd = struct.unpack('H', data[:2])[0]
+		self.len = struct.unpack('H', data[2:4])[0]
+		self.session = struct.unpack('I', data[4:8])[0]
+		self.stat = struct.unpack('I', data[8:12])[0]
+		self.sender_context = struct.unpack('Q', data[12:20])[0]
+		self.options = struct.unpack('I', data[20:])[0]
+
+	def encode(self) -> bytes:
+		#packs this object up to send to socket
+		data = struct.pack('H',self.cmd) + \
+				struct.pack('H',self.len) + \
+				struct.pack('I',self.session) + \
+				struct.pack('I',self.stat) + \
+				struct.pack('Q',self.sender_context) + \
+				struct.pack('I',self.options)
+		return data
+
+HOST = "192.168.10.10"
 TCP_PORT = 44818
 UDP_PORT = 2222 # on the server
 
@@ -32,6 +70,7 @@ class EIP_server():
 			print(data)
 			if data[:4] == b'\x04\x00\x00\x00':
 				eip_header = b"\x04\x00\x1a\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+
 				#send back EIP header unchanged and list the Services
 				c.sendall(eip_header+b'\x01\x00\x00\x01\x14\x00\x01\x00 \x01Communications\x00\x00')
 				##################

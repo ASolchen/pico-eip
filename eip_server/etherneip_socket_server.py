@@ -2,6 +2,7 @@
 import socket
 import struct, time
 
+
 class EIP_Header():
     def __init__(self, data=None) -> None:
         self.cmd = None

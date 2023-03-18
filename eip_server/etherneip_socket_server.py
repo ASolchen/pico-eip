@@ -35,7 +35,7 @@ class EIP_Header():
 
 class CIP_ConnectionManager(): #72 bytes to parse
     def __init__(self, data) -> None:
-        self.sequence = 32000
+        self.sequence = 65500
         self.interface_handle = struct.unpack('I', data[:4])[0]     #00000000 Interface Handle: CIP (0x00000000)
         self.timeout = struct.unpack('H', data[4:6])[0]             #0000     Timeout: 0
         self.count = struct.unpack('H', data[6:8])[0]               #0200     Item Count: 2
@@ -178,15 +178,15 @@ class EIP_server():
                                     t = time.time()
                                     print(f'Sequence: {con_manager.sequence}')
                                     tx_data = con_manager.cip_io_encode()
-                                    print(f"UDP Tx data: {tx_data!r}")
+                                    print(f"UDP Tx data: {len(tx_data)} bytes")
                                     self.udp_socket.sendto(tx_data, (self.tcp_addr[0], UDP_PORT))
                                 try:
                                     rx_data, addr = self.udp_socket.recvfrom(1024)
                                     udp_watchdog = time.time()
-                                    print(f"UDP Rx data: {rx_data!r}")
+                                    print(f"UDP Rx data: {len(rx_data)} bytes")
                                 except TimeoutError:
                                         pass
-                                if (time.time() - udp_watchdog > 1.0):
+                                if (time.time() - udp_watchdog > 5.0):
                                     udp_ok = False
                                     print("UDP watchdog expired")
         except Exception as err:
@@ -194,6 +194,6 @@ class EIP_server():
 
                                 
 
-
-eip = EIP_server()
-print("Closing")
+if __name__ == "__main__":
+    eip = EIP_server()
+    print("Closing")

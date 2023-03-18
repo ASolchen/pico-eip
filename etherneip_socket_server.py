@@ -89,22 +89,22 @@ class CIP_ConnectionManager(): #72 bytes to parse
         data += struct.pack('B', 0x00)                      # 00 Reserved: 0x00
         data += struct.pack('H', 0x8000)                    # 0080 Type ID: Socket Address Info O->T (0x8000)
         data += struct.pack('H', 16)                        # 1000 Length: 16
-        data += struct.pack('H', 2)                         # 0002 sin_family: 2
-        data += struct.pack('H', 2222)                      # 08ae sin_port: 2222
+        data += struct.pack('H', 0x0200)                    # 0002 sin_family: 2
+        data += struct.pack('H', 0xae08)                    # 08ae sin_port: 2222
         data += struct.pack('I', 0x00000000)                # 00000000 sin_addr: 0.0.0.0
         data += struct.pack('Q', 0x0000000000000000)        # 0000000000000000 sin_zero: 0000000000000000
         return data
 
     def cip_io_encode(self):
         data = struct.pack('H', 2)                 #0200 Item Count: 2
-        data += struct.pack('I', 0x8002)           #0280 Type ID: Sequenced Address Item (0x8002)
-        data += struct.pack('B', 8)                #08 Length: 8
+        data += struct.pack('H', 0x8002)           #0280 Type ID: Sequenced Address Item (0x8002)
+        data += struct.pack('H', 8)                #08 Length: 8
         data += struct.pack('I', self.t_to_o_id)   #013d3300 Connection ID: 0x00333d01
         data += struct.pack('I', self.sequence)    #01000000 Encapsulation Sequence Number: 1-2^16
         data += struct.pack('H', 0x00b1)           #b100 Type ID: Connected Data Item (0x00b1)
         data += struct.pack('H', 34)               #2200 Length: 34
         data += struct.pack('H', self.sequence)    #2200 CIP Sequence Count: 1-2^16
-        data += struct.pack('B'*32, *[i for i in range(32)])    #Data!!
+        data += struct.pack('B'*32, *[0x00 for i in range(32)])    #Data!!
         #increment sequence number
         self.sequence = (self.sequence + 1) % 2**16
         return data
@@ -115,81 +115,85 @@ UDP_PORT = 2222 # on the server
 
 class EIP_server():
     def __init__(self) -> None:
-        self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        #self.tcp_socket.settimeout(5)
-        self.tcp_socket.bind((HOST, TCP_PORT))
-        self.tcp_conn = None
-        self.tcp_addr = None
-        self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.udp_socket.settimeout(0.010)
-        self.udp_conn = None
-        self.state = 0
-    
-    def start(self):
-        self.update()
+        while 1:
+            time.sleep(5)
+            self.tcp_conn = None
+            self.tcp_addr = None
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.tcp_socket.settimeout(5.0)
+            self.tcp_socket.bind((HOST, TCP_PORT))
+            self.udp_socket.settimeout(None)
+            self.update()
+            self.tcp_socket.close()
+            self.udp_socket.close()
+            print("resetting all connections")
 
     def update(self):
-        self.tcp_socket.listen()
-        print("Listening on TCP...")
-        self.tcp_conn, self.tcp_addr = self.tcp_socket.accept()
-        with self.tcp_conn as c:
-            data = c.recv(1024)
-            print(f"TCP data (List Services): {data!r}")
-            #read the session and stucture
-            #send back the tcp data needed
-            print(data)
-            eip_header = EIP_Header(data)
-            if eip_header.cmd == 0x0004: #List Services
-                cip_data = b"\x01\x00\x00\x01\x14\x00\x01\x00\x20\x01\x43\x6f\x6d\x6d\x75\x6e\x69\x63\x61\x74\x69\x6f\x6e\x73\x00\x00"
-                eip_header.len = len(cip_data)
-                print(eip_header.encode()+cip_data)
-                c.sendall(eip_header.encode()+cip_data)
+        try:
+            self.tcp_socket.listen()
+            print("Listening on TCP...")
+            self.tcp_conn, self.tcp_addr = self.tcp_socket.accept()
+            with self.tcp_conn as c:
                 data = c.recv(1024)
+                print(f"TCP data (List Services): {data!r}")
+                #read the session and stucture
+                #send back the tcp data needed
+                print(data)
                 eip_header = EIP_Header(data)
-                if eip_header.cmd == 0x0065: #Register Session
-                    print(f"TCP data (register session): {data!r}")
-                    cip_data = b"\x01\x00\x00\x00"
+                if eip_header.cmd == 0x0004: #List Services
+                    cip_data = b"\x01\x00\x00\x01\x14\x00\x01\x00\x20\x01\x43\x6f\x6d\x6d\x75\x6e\x69\x63\x61\x74\x69\x6f\x6e\x73\x00\x00"
                     eip_header.len = len(cip_data)
-                    eip_header.session = 1
-                    data = eip_header.encode() + cip_data
-                    print(data)
-                    c.sendall(data)
-                    ##################
+                    print(eip_header.encode()+cip_data)
+                    c.sendall(eip_header.encode()+cip_data)
                     data = c.recv(1024)
                     eip_header = EIP_Header(data)
-                    if eip_header.cmd == 0x006f: #Send RR Data
-                        print(f"TCP data (Forward Open): {data!r}")
-                        con_manager = CIP_ConnectionManager(data[24:], )
-                        cip_data = con_manager.cm_encode()
+                    if eip_header.cmd == 0x0065: #Register Session
+                        print(f"TCP data (register session): {data!r}")
+                        cip_data = b"\x01\x00\x00\x00"
                         eip_header.len = len(cip_data)
-                        data = eip_header.encode()+cip_data
+                        eip_header.session = 1
+                        data = eip_header.encode() + cip_data
+                        print(data)
                         c.sendall(data)
-                        print("sent forward open reply")
-                        self.udp_socket.bind((HOST, UDP_PORT))
-                        print("UDP Listening")
-                        t = time.time()
-                        while 1:
-                            if ((time.time() - t) > 0.3):
-                                t = time.time()
-                                print(f'Sequence: {con_manager.sequence}')
-                                tx_data = con_manager.cip_io_encode()
-                                print(f"UDP Tx data: {tx_data!r}")
-                                self.udp_socket.sendto(tx_data, (self.tcp_addr[0], UDP_PORT))
-                            try:
-                                rx_data, addr = self.udp_socket.recvfrom(1024)
-                                print(f"UDP Rx data: {rx_data!r}")
-                            except TimeoutError:
-                                pass
+                        ##################
+                        data = c.recv(1024)
+                        eip_header = EIP_Header(data)
+                        if eip_header.cmd == 0x006f: #Send RR Data
+                            print(f"TCP data (Forward Open): {data!r}")
+                            con_manager = CIP_ConnectionManager(data[24:], )
+                            cip_data = con_manager.cm_encode()
+                            eip_header.len = len(cip_data)
+                            data = eip_header.encode()+cip_data
+                            c.sendall(data)
+                            print("sent forward open reply")
+                            self.udp_socket.bind((HOST, UDP_PORT))
+                            self.udp_socket.settimeout(0.06)
+                            print("UDP Listening")
+                            t = time.time()
+                            udp_ok = True
+                            udp_watchdog = t
+                            while udp_ok:
+                                if ((time.time() - t) > 0.02):
+                                    t = time.time()
+                                    print(f'Sequence: {con_manager.sequence}')
+                                    tx_data = con_manager.cip_io_encode()
+                                    print(f"UDP Tx data: {tx_data!r}")
+                                    self.udp_socket.sendto(tx_data, (self.tcp_addr[0], UDP_PORT))
+                                try:
+                                    rx_data, addr = self.udp_socket.recvfrom(1024)
+                                    udp_watchdog = time.time()
+                                    print(f"UDP Rx data: {rx_data!r}")
+                                except TimeoutError:
+                                        pass
+                                if (time.time() - udp_watchdog > 1.0):
+                                    udp_ok = False
+                                    print("UDP watchdog expired")
+        except Exception as err:
+            print(err)
 
-                            
-                            
-                            
-
-                            
-                            
-                            
+                                
 
 
 eip = EIP_server()
-eip.start()
 print("Closing")

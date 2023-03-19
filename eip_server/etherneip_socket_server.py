@@ -1,5 +1,23 @@
 import socket
 import struct, time
+import threading
+
+
+class StoppableThread(threading.Thread):
+    """Thread class with a stop() method. The thread itself has to check
+    regularly for the stopped() condition."""
+
+    def __init__(self,  *args, **kwargs):
+        super(StoppableThread, self).__init__(*args, **kwargs)
+        self._stop_event = threading.Event()
+        self.daemon = True
+
+    def stop(self):
+        self._stop_event.set()
+
+    def stopped(self):
+        return self._stop_event.is_set()
+
 
 
 class EIP_Header():
@@ -212,18 +230,24 @@ class EIP_PICO_server():
 class EIP_server():
     
     def __init__(self) -> None:
+        self.io_thread = None
+        self.udp_socket = None
+        self.udp_active = False
         while 1:
-            time.sleep(5)
+            if self.io_thread:
+                self.io_thread.stop()
+                self.io_thread.join()
+                self.io_thread = None
             self.con_manager = None
             self.tcp_conn = None
             self.tcp_addr = None
-            self.udp_socket = None
             self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.tcp_socket.settimeout(5.0)
+            self.tcp_socket.settimeout(0.5)
             self.tcp_socket.bind((HOST, TCP_PORT))
             self.update()
             self.tcp_socket.close()
             print("resetting all connections")
+            time.sleep(1)
 
     def update(self):
         try:
@@ -231,10 +255,8 @@ class EIP_server():
             print("Listening on TCP...")
             self.tcp_conn, self.tcp_addr = self.tcp_socket.accept()
             with self.tcp_conn as c:
-                self.handle_tcp(c) #List Services
-                self.handle_tcp(c) #Register Session
-                self.handle_tcp(c) #Send RR Data
-                self.handle_cip_io()
+                while 1:
+                    self.handle_tcp(c)
         except Exception as err:
             print(err)
 
@@ -273,10 +295,23 @@ class EIP_server():
     def handle_send_rr(self, eip_header,  data):
         print(f"TCP data (Forward Open): {data}")
         self.con_manager = CIP_ConnectionManager(data[24:], )
+        #self.con_manager.sequence = 65000 # to test roll-over
         cip_data = self.con_manager.cm_encode()
         eip_header.len = len(cip_data)
         res = eip_header.encode()+cip_data
-        return res        
+        self.start_io_thread()
+        return res
+
+    def start_io_thread(self):
+        self.udp_active = False
+        if self.io_thread:
+            print(f"Killing thread {self.io_thread}")
+            self.io_thread.stop()
+            self.io_thread.join()
+        self.io_thread = StoppableThread(target=self.handle_cip_io)
+        print(f"Starting thread {self.io_thread}")
+        self.io_thread.start()
+
 
     def handle_cip_io(self):
         if self.udp_socket: #clean up an old socket
@@ -286,23 +321,26 @@ class EIP_server():
         self.udp_socket.settimeout(0.06)
         print("UDP Listening")
         t = time.time()
-        udp_ok = True
+        self.udp_active = True
         udp_watchdog = t
-        while udp_ok:
+        while self.udp_active:
+            debug = not (self.con_manager.sequence % 10)
             if ((time.time() - t) > 0.02):
                 t = time.time()
-                print(f'Sequence: {self.con_manager.sequence}')
                 tx_data = self.con_manager.cip_io_encode()
-                print(f"UDP Tx data: {len(tx_data)} bytes")
+                if debug:
+                    print(f'Sequence: {self.con_manager.sequence}')
+                    print(f"\tUDP Tx data: {len(tx_data)} bytes")
                 self.udp_socket.sendto(tx_data, (self.tcp_addr[0], UDP_PORT))
             try:
                 rx_data, addr = self.udp_socket.recvfrom(1024)
                 udp_watchdog = time.time()
-                print(f"UDP Rx data: {len(rx_data)} bytes")
+                if debug:
+                    print(f"\tUDP Rx data: {len(rx_data)} bytes")
             except TimeoutError:
                     pass
             if (time.time() - udp_watchdog > 5.0):
-                udp_ok = False
+                self.udp_active = False
                 print("UDP watchdog expired")
         self.udp_socket.close()
 

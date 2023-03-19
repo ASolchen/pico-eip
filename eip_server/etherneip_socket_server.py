@@ -1,7 +1,5 @@
-#server
 import socket
 import struct, time
-
 
 class EIP_Header():
     def __init__(self, data=None) -> None:
@@ -36,7 +34,7 @@ class EIP_Header():
 
 class CIP_ConnectionManager(): #72 bytes to parse
     def __init__(self, data) -> None:
-        self.sequence = 65500
+        self.sequence = 1
         self.interface_handle = struct.unpack('I', data[:4])[0]     #00000000 Interface Handle: CIP (0x00000000)
         self.timeout = struct.unpack('H', data[4:6])[0]             #0000     Timeout: 0
         self.count = struct.unpack('H', data[6:8])[0]               #0200     Item Count: 2
@@ -109,12 +107,107 @@ class CIP_ConnectionManager(): #72 bytes to parse
         #increment sequence number
         self.sequence = (self.sequence + 1) % 2**16
         return data
- 
-HOST = "192.168.10.10"
+import os
+if hasattr(os, "uname") and os.uname()[0]=='rp2':
+    
+    print("starting PICO wifi")
+    import network
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect("SolchenX","Mason123")
+    sta_if = network.WLAN(network.STA_IF)
+    addr = socket.getaddrinfo('0.0.0.0', 44818)[0][-1]
+    print(addr)
+    HOST = sta_if.ifconfig()[0]
+else:
+    HOST = "192.168.20.21"
+print(f'Hosting on {HOST}')
 TCP_PORT = 44818
 UDP_PORT = 2222 # on the server
 
+class EIP_PICO_server():
+    def __init__(self) -> None:
+        while 1:
+            time.sleep(5)
+            self.tcp_conn = None
+            self.tcp_addr = None
+            self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            self.tcp_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            #self.tcp_socket.settimeout(5.0)
+            self.tcp_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.tcp_socket.bind(socket.getaddrinfo('0.0.0.0', 44818)[0][-1])
+            self.udp_socket.settimeout(None)
+            self.update()
+            self.tcp_socket.close()
+            self.udp_socket.close()
+            print("resetting all connections")
+            time.sleep(5)
+
+    def update(self):
+        try:
+            self.tcp_socket.listen(1)
+            print("Listening on TCP...")
+            self.tcp_conn, self.tcp_addr = self.tcp_socket.accept()
+            data = self.tcp_conn.recv(1024)
+            print(f"TCP data (List Services): {data}")
+            #read the session and stucture
+            #send back the tcp data needed
+            print(data)
+            eip_header = EIP_Header(data)
+            if eip_header.cmd == 0x0004: #List Services
+                cip_data = b"\x01\x00\x00\x01\x14\x00\x01\x00\x20\x01\x43\x6f\x6d\x6d\x75\x6e\x69\x63\x61\x74\x69\x6f\x6e\x73\x00\x00"
+                eip_header.len = len(cip_data)
+                print(eip_header.encode()+cip_data)
+                self.tcp_conn.sendall(eip_header.encode()+cip_data)
+                data = self.tcp_conn.recv(1024)
+                eip_header = EIP_Header(data)
+                if eip_header.cmd == 0x0065: #Register Session
+                    print(f"TCP data (register session): {data}")
+                    cip_data = b"\x01\x00\x00\x00"
+                    eip_header.len = len(cip_data)
+                    eip_header.session = 1
+                    data = eip_header.encode() + cip_data
+                    print(data)
+                    self.tcp_conn.sendall(data)
+                    ##################
+                    data = self.tcp_conn.recv(1024)
+                    eip_header = EIP_Header(data)
+                    if eip_header.cmd == 0x006f: #Send RR Data
+                        print(f"TCP data (Forward Open): {data}")
+                        con_manager = CIP_ConnectionManager(data[24:], )
+                        cip_data = con_manager.cm_encode()
+                        eip_header.len = len(cip_data)
+                        data = eip_header.encode()+cip_data
+                        self.tcp_conn.sendall(data)
+                        print("sent forward open reply")
+                        self.udp_socket.bind((HOST, UDP_PORT))
+                        self.udp_socket.settimeout(0.06)
+                        print("UDP Listening")
+                        rpi_t = time.ticks_ms()
+                        udp_ok = True
+                        udp_watchdog = rpi_t
+                        while udp_ok:
+                            if (time.ticks_diff(time.ticks_ms(), rpi_t) > 20):
+                                rpi_t = time.ticks_ms()
+                                print(f'Sequence: {con_manager.sequence}')
+                                tx_data = con_manager.cip_io_encode()
+                                print(f"UDP Tx data: {len(tx_data)} bytes")
+                                self.udp_socket.sendto(tx_data, (self.tcp_addr[0], UDP_PORT))
+                            try:
+                                rx_data, addr = self.udp_socket.recvfrom(1024)
+                                udp_watchdog = time.ticks_ms()
+                                print(f"UDP Rx data: {len(rx_data)} bytes")
+                            except Exception as e:
+                                    print(f"Error in UDP {e}")
+                            if (time.ticks_ms() - udp_watchdog > 5000):
+                                udp_ok = False
+                                print("UDP watchdog expired")
+        except Exception as err:
+            print(err)
+
+                                
 class EIP_server():
+    HOST = "192.168.10.10"
     def __init__(self) -> None:
         while 1:
             time.sleep(5)
@@ -137,7 +230,7 @@ class EIP_server():
             self.tcp_conn, self.tcp_addr = self.tcp_socket.accept()
             with self.tcp_conn as c:
                 data = c.recv(1024)
-                print(f"TCP data (List Services): {data!r}")
+                print(f"TCP data (List Services): {data}")
                 #read the session and stucture
                 #send back the tcp data needed
                 print(data)
@@ -150,7 +243,7 @@ class EIP_server():
                     data = c.recv(1024)
                     eip_header = EIP_Header(data)
                     if eip_header.cmd == 0x0065: #Register Session
-                        print(f"TCP data (register session): {data!r}")
+                        print(f"TCP data (register session): {data}")
                         cip_data = b"\x01\x00\x00\x00"
                         eip_header.len = len(cip_data)
                         eip_header.session = 1
@@ -161,7 +254,7 @@ class EIP_server():
                         data = c.recv(1024)
                         eip_header = EIP_Header(data)
                         if eip_header.cmd == 0x006f: #Send RR Data
-                            print(f"TCP data (Forward Open): {data!r}")
+                            print(f"TCP data (Forward Open): {data}")
                             con_manager = CIP_ConnectionManager(data[24:], )
                             cip_data = con_manager.cm_encode()
                             eip_header.len = len(cip_data)
@@ -193,8 +286,8 @@ class EIP_server():
         except Exception as err:
             print(err)
 
-                                
 
 if __name__ == "__main__":
     eip = EIP_server()
     print("Closing")
+

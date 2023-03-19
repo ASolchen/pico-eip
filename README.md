@@ -1,7 +1,7 @@
 # pico-eip
 ## Use a Raspberry Pi Pico W as an EthernetIP remote IO device
 
-This is very early in testing. The standard python version (windows/mac/linux) is working. It's a bit buggy but keeps trying. I also had the micropytohn version working, but needs some updating. Eventually, I'd like to use the Pico's 2nd core to handle the IO (UDP) connection.
+This is very early in testing. The standard python version (windows/mac/linux) is working. It's a bit buggy but keeps trying. I also had the micropython version working, but needs some updating. Eventually, I'd like to use the Pico's 2nd core to handle the IO (UDP) connection.
 
 Testing in a CompactLogix PLC.
 
@@ -21,8 +21,9 @@ foo@bar:~/PICO-EIP$ python3 main.py
 
 ## Future Plans:
 1. Get the PC version more stable.
-⋅⋅1. Once runnig, it will be stable until a sequence roll-over. The sequence is a 16-bit number so it rolls over at 2**16
+⋅⋅1. Once running, it will be stable until a sequence roll-over. The sequence is a 16-bit number so it rolls over at 2**16
 2. Update Pico version to match the methods used in the pc one.
 3. Change data format in eds and code. Right now it is 32 bytes in, 32 bytes out.
-4. Add proper logging, not `print(f'doing stuff')'    
+4. Add proper logging, not `print(f'doing stuff')`    
 5. Use kwarg for HOST
+6. Make a client-side version to allow using a PC as master. Possibly use real remote IO, as well.
